@@ -1,0 +1,226 @@
+---
+title: "Practical Machine Learning Project"
+author: "JanaCX"
+date: "April 23, 2015"
+output:
+  html_document:
+    fig_caption: yes
+    highlight: pygments
+    theme: cosmo
+---
+
+# Background
+
+Using devices such as [Jawbone Up] [1] , [Nike Fuelband] [2], or [Fitbit] [3] it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+In this project, data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants is analyzed. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the [Groupware_LES] [4] group's website in the Weight Lifting Exercise Dataset section. 
+
+
+[2]: http://www.nike.com/us/en_us/c/nikeplusfuelband "Nike Fuelband"
+[1]: https://jawbone.com/up "Jawbone Up"
+[3]: http://www.fitbit.com "Fitbit"
+[4]: http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises "Groupware_LES"
+
+
+
+# Data 
+
+The [training data][5] and [test data][6] for this project come from the Human Activity Recognition project directed by [Ugulino et. al][7]. Please give credit to the original authors if you use the data for any purposes.
+
+[5]: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv "training data"
+[6]: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv "test data"
+[7]: http://groupware.les.inf.puc-rio.br/har "Ugulino et. al"
+
+```{r downloading the data}
+setwd("~/Documents/DataSci/8_MachineLearning/Project")
+
+if (!file.exists("pml-training.csv")) {
+      URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+      download.file(URL, "pml-training.csv", method = "curl")
+      rm(URL)
+}
+
+if (!file.exists("pml-testing.csv")) {
+      URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+      download.file(URL, "pml-testing.csv", method="curl")
+      rm(URL)
+}
+```
+
+# Preparing for Cross Validation
+
+As a first step, the dataset is split into two subsets: 60% of the data is randomly assigned to the training dataset and the remaining 40% to the testing data set.  This data split is part of the cross validation analysis, the testing data set is used to evaluate the performance of the model before applying to the validation set.  
+
+
+```{r Data SplittingCross validation, message=FALSE}
+library (ggplot2); library(gridExtra); library(caret); library (knitr)
+activityData <- read.csv("pml-training.csv", header = T, stringsAsFactors = F)
+# Gives the column number whose name is "classe"   y <- match("classe", names(activityData))
+features <- names(activityData)
+# sum(!is.na(activityData$max_roll_belt))
+
+set.seed(6432)
+inTrain <- createDataPartition(y = activityData$classe, p=0.6, list =F)
+training <- activityData[inTrain, ]
+testing <- activityData[-inTrain, ]
+training$classe <- as.factor(training$classe)
+testing$classe <- as.factor(testing$classe)
+
+validationData <- read.csv("pml-testing.csv", header = T, stringsAsFactors = F)
+```
+
+In their original analysis, published in the Proceedings of the 4th International Conference in Cooperation with SIGCHI, the authors defined a series of features using a time sliding window. In the present analysis, we will build a model based on the original measurements.  
+The following code, recovers the features that were not produced by the window split and that are not a statistical measure of the sensor measurements.  
+
+```{r original measurements}
+# Recovering the actual measures / ignore the statistics ran on sliding windows
+delcols <- c(1:7,grep("kurtosis.", features, ignore.case=T), grep("user_name", features, ignore.case=T), grep("skewness.", features, ignore.case=T), grep ("avg.", features, ignore.case=T), grep("var.", features, ignore.case=T), grep("stddev.", features, ignore.case=T), grep("max.", features, ignore.case=T), grep("min.", features, ignore.case=T), grep("amplitude.", features, ignore.case=T))
+training <- training[-delcols] 
+
+# Create performance measures
+execTimes <- vector(mode = "numeric", length = 4)
+accuracies <- vector(mode = "numeric", length = 4)
+trainingvalues <- vector(mode = "numeric", length = 5)
+trainingvalues[1] <- sum(testing$classe=="A")
+trainingvalues[2] <- sum(testing$classe=="B")
+trainingvalues[3] <- sum(testing$classe=="C")
+trainingvalues[4] <- sum(testing$classe=="D")
+trainingvalues[5] <- sum(testing$classe=="E")
+#summary(training)
+```
+
+# Exploratory Analysis
+
+The following graphs explore the variation of some of the predictors as a function of sensor location. Observe the different value ranges for the pitch and roll variables depending on the sensor location. 
+
+```{r Exploratory Analysis, echo=FALSE, eval=T, message=FALSE, fig.cap="Fig 1. Boxplot graphs showing the effect of the pitch parameter at the four sensor locations"}
+p1 <- ggplot(data=training, aes(x=classe, y=pitch_belt, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Belt sensor")
+p2 <- ggplot(data=training, aes(x=classe, y=pitch_dumbbell, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Dumbbell sensor")
+p3 <- ggplot(data=training, aes(x=classe, y=pitch_arm, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Glove sensor")
+p4 <- ggplot(data=training, aes(x=classe, y=pitch_forearm, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Arm Band sensor")
+grid.arrange(p1, p2, p3, p4, ncol=2)
+```
+
+```{r figure 2, echo=FALSE, message=FALSE, fig.cap="Fig 2. Boxplot graphs showing the effect of the roll parameter for each sensor location for 5 modes of exercise execution"}
+p1 <- ggplot(data=training, aes(x=classe, y=roll_belt, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Belt sensor")
+p2 <- ggplot(data=training, aes(x=classe, y=roll_dumbbell, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Dumbbell sensor")
+p3 <- ggplot(data=training, aes(x=classe, y=roll_arm, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Glove sensor")
+p4 <- ggplot(data=training, aes(x=classe, y=roll_forearm, fill=classe)) + geom_boxplot() + guides(fill=FALSE) + labs(title="Arm Band sensor")
+grid.arrange(p1, p2, p3, p4, ncol=2)
+```
+
+The following plots show two parameters at a time at the arm sensors. Observe the curved boundaries (hyperbola-like) formed by the D (blue) and E (purple) series. In the top graph, the points associated with the correct way of doing the exercise (series A) remain mostly in the outline. Thus, in spite of the overlapping, a model containing these variables may be albe to separate the groups, thus a few models will be attempted without construction further features.
+
+```{r figure 3, echo=FALSE, message=FALSE, fig.cap="Fig 3. Scatter plots of roll, yaw and pitch variables at the arm", fig.height=7}
+p1 <- qplot(training$yaw_arm, training$roll_arm, colour=training$classe)
+p2 <- qplot(training$pitch_arm, training$roll_arm, colour=training$classe)
+grid.arrange(p1, p2, nrow=2)
+```
+
+
+# Model Construction
+ 
+In the exploratory analysis section, we observed that a model based ont he raw data may be sufficient to separate the groups.  
+One should remember the objective is to construct a model to predict a categorical variable as a function of a series of continuous variables. A vast amount of models exist for this purpose. In this project we will start with the simplest ones and we will track two performance parameters: *execution time* and *accuracy*. 
+
+Four models were evaluated in this paper:  
+
+- A categorical tree. One tree approach with no further boosting.  
+- A linear discriminant analysis (LDA) on all the raw variables. This model calculates planar boundaries separating each category in a *p-dimensional* space (53-dimensions in this case).  
+- A linear discriminant analysis on a reduced space. In this model a principal components analysis algorithm was used to reduce the variable space before applying LDA.  
+- A Quadratic discriminant analysis (QDA) on all the raw variables. A quadratic model was selected to account for curved boundaries and non-linear dependencies like the ones shown in figure 3. The large number of observations enables the use of this approach, however a further reduction of the number of variables may need to be explored. 
+
+## *Categorical Tree*  
+Observe that this model can only differentiate up to 4 of the 5 categories. 
+```{r tree, message=FALSE, warning=FALSE}
+ptm <- proc.time()
+modFitTree <- train(classe ~., method ="rpart", data =training)
+execTimes[1] <- proc.time() - ptm
+library(rattle)
+fancyRpartPlot(modFitTree$finalModel)
+# Predicting new values
+predTree <- predict(modFitTree, newdata=testing)
+confTree <- confusionMatrix(testing$classe, predTree)
+accuracies[1] <- round(confTree$overall[1], 3)
+correctTree <- round(diag(table(testing$classe, predTree))/trainingvalues,3)
+```
+
+## *Linear Discriminant Analysis*  
+
+- **LDA on the raw variables**    
+
+```{r LDA model, message=FALSE, warning=FALSE}
+ptm <- proc.time()
+modlda <- train(classe ~ ., data =training, method ="lda")
+execTimes[2] <-proc.time() - ptm
+predLDA <- predict(modlda, testing)
+confLDA <- confusionMatrix(testing$classe, predLDA)
+accuracies[2] <- round(confLDA$overall[1], 3)
+correctLDA <- round(diag(table(testing$classe, predLDA))/trainingvalues,3)
+print(c("Proportion of correctly predicted values per category", correctLDA))
+```
+
+- **LDA on the PCA of the raw variables**  
+
+```{r PCA and LDA, message=FALSE, warning=FALSE}
+ptm <- proc.time()
+modelPCA <- train(training$classe ~., method ="lda", preProcess ="pca", data =training)
+execTimes[3] <-proc.time() - ptm
+predPC <- predict(modelPCA, testing[ ,-delcols])
+confPCA <- confusionMatrix(testing$classe, predPC)
+accuracies[3] <- round(confPCA$overall[1], 3)
+correctPCA <- round(diag(table(testing$classe, predPC))/trainingvalues,3)
+print(c("Proportion of correctly predicted values per category", correctPCA))
+```
+
+We can observe that the LDA model has a better prediction performance compared to the PCA + LDA model. In this case, the principal component analysis decreased the signal/noise ratio. The overall accuracies calculated from the confusion matrix of the models are `r accuracies[2]` for the LDA model and `r accuracies[3]` for the PCA + LDA model.
+
+## *Quadratic Discriminant Analysis*  
+
+As observed in figure 3, there are some curved boundaries, thus a quadratic discriminant analysis was attempted. This model provided a much higher prediction performance than the previously attempted models.
+
+```{r QDA model, message=FALSE, warning=FALSE}
+ptm <- proc.time()
+modQDA <- train(classe ~ ., data =training, method ="qda")
+execTimes[4] <-proc.time() - ptm
+predQDA <- predict(modQDA, testing)
+confQDA <- confusionMatrix(testing$classe, predQDA)
+accuracies[4] <- round(confQDA$overall[1], 3)
+correctQDA <- round(diag(table(testing$classe, predQDA))/trainingvalues,3)
+print(c("Proportion of correctly predicted values per category", correctQDA))
+```
+
+# Model Comparison 
+The following table shows a comparison of the models analyzed. The performance parameters showed that the model based on quadratic discriminant analysis has higher accuracy than the other three models and the execution time is also reduced compared to more complicated algorithms like classification trees. Considering a balance of the execution time and accuracy, we believe that the QDA model is superior and no other models were attempted such a random forests that could have provided an increase in accuracy in exchange of an impractical execution time given the computer power available.
+
+```{r model performance, message=FALSE, warning=FALSE}
+methods <- c("Classification Tree", "LDA", "PCA + LDA", "QDA")
+performance <- as.data.frame(cbind(methods, execTimes, accuracies))
+kable(performance)
+```
+
+### **Expected out of sample error**  
+In the cross validation section of this paper, the data was split in training and testing sets. The testing set has been used to calculate the our of sample error of the models. 
+A detailed series of measures of the accuracy of the QDA model is shown by the confusion matrix. The expected performance on a new data set is given by the 95% confidence interval (0.8831, 0.8971).
+
+```{r print confusion matrix QDA, echo=FALSE}
+confQDA
+```
+
+
+# Model Performance  
+
+The QDA model was applied to the validation set, which includes 20 blind predictions. Predicted results are as follows: 
+
+```{r performance on validation set}
+predictions <- predict(modQDA, validationData)
+id <- as.character(seq(1,20))
+results <- as.data.frame(cbind(id, as.character(predictions)))
+names(results) <- c("Problem ID", "Predicted Value")
+kable(results)
+```
+
+# Annex: System information
+This script was prepared and ran in the following environment:
+```{r running environment}
+sessionInfo()
+```
